@@ -1,0 +1,11 @@
+name: AdelphesMinecraftPlugin
+version: 1.0.0
+main: fr.esteban.adelphesminecraftplugin.MinecraftDiscordBridgePlugin
+api-version: "1.21"
+author: Esteban
+description: Pont bidirectionnel entre le chat Minecraft et Discord.
+
+permissions:
+  adelphesminecraftplugin.chat:
+    description: Autorise un joueur à relayer ses messages Minecraft vers Discord.
+    default: true

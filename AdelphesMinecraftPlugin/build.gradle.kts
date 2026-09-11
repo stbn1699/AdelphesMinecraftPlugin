@@ -1,20 +1,35 @@
 plugins {
-    id("java")
+    java
 }
 
 group = "fr.esteban"
-version = "1.0-SNAPSHOT"
+version = "1.0.0"
 
 repositories {
     mavenCentral()
+
+    maven {
+        url = uri("https://repo.papermc.io/repository/maven-public/")
+    }
 }
 
 dependencies {
-    testImplementation(platform("org.junit:junit-bom:6.0.0"))
-    testImplementation("org.junit.jupiter:junit-jupiter")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
 }
 
-tasks.test {
-    useJUnitPlatform()
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
+}
+
+tasks {
+    compileJava {
+        options.encoding = "UTF-8"
+        options.release.set(21)
+    }
+
+    processResources {
+        filteringCharset = "UTF-8"
+    }
 }

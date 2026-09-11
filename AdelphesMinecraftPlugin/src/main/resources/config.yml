@@ -1,0 +1,21 @@
+# Adresse de l'API Express lancée par ton bot Discord.
+# 127.0.0.1 fonctionne uniquement si Paper et le bot tournent
+# sur le même ordinateur.
+bot-url: "http://127.0.0.1:3001/minecraft/chat"
+
+# Port sur lequel le plugin reçoit les messages du bot Discord.
+# Cette valeur doit correspondre à MINECRAFT_SERVER_WEBHOOK_URL
+# dans le fichier .env de ton bot.
+http-port: 8080
+
+# La même clé que MINECRAFT_BRIDGE_SECRET dans le .env du bot.
+bridge-secret: "unecletreslonguealeatoire"
+
+# Texte affiché devant les messages venant de Discord dans Minecraft.
+discord-prefix: "[Discord]"
+
+# Active/désactive Minecraft -> Discord.
+relay-minecraft-to-discord: true
+
+# Active/désactive Discord -> Minecraft.
+relay-discord-to-minecraft: true
