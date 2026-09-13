@@ -93,7 +93,7 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
 
         this.botUrl = getConfig().getString(
                 "bot-url",
-                "http://127.0.0.1:3001/minecraft/chat"
+                "http://192.168.1.89:3009/minecraft/chat"
         );
 
         this.bridgeSecret = getConfig().getString("bridge-secret", "");
@@ -186,7 +186,7 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
         int port = getConfig().getInt("http-port", 8080);
 
         this.httpServer = HttpServer.create(
-                new InetSocketAddress("127.0.0.1", port),
+                new InetSocketAddress("0.0.0.0", port),
                 0
         );
 
@@ -199,7 +199,7 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
         this.httpServer.start();
 
         getLogger().info(
-                "Discord -> Minecraft : http://127.0.0.1:"
+                "Discord -> Minecraft : http://0.0.0.0:"
                         + port
                         + "/discord-message"
         );

@@ -1,7 +1,7 @@
 # Adresse de l'API Express lancée par ton bot Discord.
 # 127.0.0.1 fonctionne uniquement si Paper et le bot tournent
 # sur le même ordinateur.
-bot-url: "http://127.0.0.1:3001/minecraft/chat"
+bot-url: "http://192.168.1.89:3009/minecraft/chat"
 
 # Port sur lequel le plugin reçoit les messages du bot Discord.
 # Cette valeur doit correspondre à MINECRAFT_SERVER_WEBHOOK_URL
