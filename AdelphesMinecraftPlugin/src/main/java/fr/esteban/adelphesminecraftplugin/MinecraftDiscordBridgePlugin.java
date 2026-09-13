@@ -6,10 +6,13 @@ import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
+import org.bukkit.advancement.Advancement;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerAdvancementDoneEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.IOException;
@@ -35,20 +38,30 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
     private ExecutorService httpExecutor;
     private HttpServer httpServer;
 
-    private String botUrl;
+    private String chatBotUrl;
+    private String deathBotUrl;
+    private String advancementBotUrl;
     private String bridgeSecret;
     private String discordPrefix;
 
     private boolean relayMinecraftToDiscord;
     private boolean relayDiscordToMinecraft;
+    private boolean relayDeathsToDiscord;
+    private boolean relayAdvancementsToDiscord;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        loadBridgeConfiguration();
+
+        try {
+            loadBridgeConfiguration();
+        } catch (IllegalStateException exception) {
+            getLogger().log(Level.SEVERE, exception.getMessage(), exception);
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
 
         this.httpExecutor = Executors.newFixedThreadPool(4);
-
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .executor(this.httpExecutor)
@@ -61,16 +74,17 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
         } catch (IOException exception) {
             getLogger().log(
                     Level.SEVERE,
-                    "Impossible de démarrer le serveur HTTP du bridge.",
+                    "Impossible de démarrer le serveur HTTP Discord -> Minecraft.",
                     exception
             );
-
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
 
         getLogger().info("AdelphesMinecraftPlugin activé.");
-        getLogger().info("Minecraft -> Discord : " + this.botUrl);
+        getLogger().info("Chat Minecraft -> Discord : " + this.chatBotUrl);
+        getLogger().info("Morts Minecraft -> Discord : " + this.deathBotUrl);
+        getLogger().info("Advancements Minecraft -> Discord : " + this.advancementBotUrl);
     }
 
     @Override
@@ -91,17 +105,23 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
     private void loadBridgeConfiguration() {
         reloadConfig();
 
-        this.botUrl = getConfig().getString(
-                "bot-url",
+        this.chatBotUrl = getConfig().getString(
+                "chat-bot-url",
                 "http://192.168.1.89:3009/minecraft/chat"
         );
 
-        this.bridgeSecret = getConfig().getString("bridge-secret", "");
-
-        this.discordPrefix = getConfig().getString(
-                "discord-prefix",
-                "[Discord]"
+        this.deathBotUrl = getConfig().getString(
+                "death-bot-url",
+                "http://192.168.1.89:3009/minecraft/death"
         );
+
+        this.advancementBotUrl = getConfig().getString(
+                "advancement-bot-url",
+                "http://192.168.1.89:3009/minecraft/advancement"
+        );
+
+        this.bridgeSecret = getConfig().getString("bridge-secret", "");
+        this.discordPrefix = getConfig().getString("discord-prefix", "[Discord]");
 
         this.relayMinecraftToDiscord = getConfig().getBoolean(
                 "relay-minecraft-to-discord",
@@ -113,10 +133,40 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
                 true
         );
 
-        if (this.bridgeSecret.isBlank()
+        this.relayDeathsToDiscord = getConfig().getBoolean(
+                "relay-deaths-to-discord",
+                true
+        );
+
+        this.relayAdvancementsToDiscord = getConfig().getBoolean(
+                "relay-advancements-to-discord",
+                true
+        );
+
+        if (this.bridgeSecret == null
+                || this.bridgeSecret.isBlank()
                 || this.bridgeSecret.equals("REMPLACE_PAR_TA_CLE_SECRETE")) {
             throw new IllegalStateException(
                     "Configure bridge-secret dans plugins/AdelphesMinecraftPlugin/config.yml"
+            );
+        }
+
+        validateUrl("chat-bot-url", this.chatBotUrl);
+        validateUrl("death-bot-url", this.deathBotUrl);
+        validateUrl("advancement-bot-url", this.advancementBotUrl);
+    }
+
+    private void validateUrl(String configKey, String url) {
+        if (url == null || url.isBlank()) {
+            throw new IllegalStateException("La valeur " + configKey + " est manquante dans config.yml");
+        }
+
+        try {
+            URI.create(url);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException(
+                    "La valeur " + configKey + " n'est pas une URL valide : " + url,
+                    exception
             );
         }
     }
@@ -129,8 +179,7 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
 
         Player player = event.getPlayer();
 
-        if (!player.hasPermission("adelphesminecraftplugin.chat")
-                && !player.isOp()) {
+        if (!player.hasPermission("adelphesminecraftplugin.chat") && !player.isOp()) {
             return;
         }
 
@@ -141,25 +190,91 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
             return;
         }
 
-        sendMinecraftMessageToDiscord(username, message);
-    }
-
-    private void sendMinecraftMessageToDiscord(String username, String message) {
         String json = "{"
                 + "\"username\":\"" + escapeJson(username) + "\","
                 + "\"message\":\"" + escapeJson(message) + "\""
                 + "}";
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(this.botUrl))
-                .timeout(Duration.ofSeconds(8))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + this.bridgeSecret)
-                .POST(HttpRequest.BodyPublishers.ofString(
-                        json,
-                        StandardCharsets.UTF_8
-                ))
-                .build();
+        sendToDiscordBot("chat", this.chatBotUrl, json);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerDeath(PlayerDeathEvent event) {
+        if (!this.relayDeathsToDiscord) {
+            return;
+        }
+
+        Component deathMessageComponent = event.deathMessage();
+
+        if (deathMessageComponent == null) {
+            return;
+        }
+
+        String username = event.getPlayer().getName();
+        String deathMessage = PLAIN_TEXT.serialize(deathMessageComponent).trim();
+
+        if (deathMessage.isBlank()) {
+            return;
+        }
+
+        String json = "{"
+                + "\"username\":\"" + escapeJson(username) + "\","
+                + "\"message\":\"" + escapeJson(deathMessage) + "\""
+                + "}";
+
+        sendToDiscordBot("mort", this.deathBotUrl, json);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlayerAdvancementDone(PlayerAdvancementDoneEvent event) {
+        if (!this.relayAdvancementsToDiscord) {
+            return;
+        }
+
+        Advancement advancement = event.getAdvancement();
+
+        if (advancement.getDisplay() == null) {
+            return;
+        }
+
+        String advancementName = PLAIN_TEXT.serialize(
+                advancement.getDisplay().displayName()
+        ).trim();
+
+        if (advancementName.isBlank()) {
+            return;
+        }
+
+        String username = event.getPlayer().getName();
+
+        String json = "{"
+                + "\"username\":\"" + escapeJson(username) + "\","
+                + "\"advancement\":\"" + escapeJson(advancementName) + "\""
+                + "}";
+
+        sendToDiscordBot("advancement", this.advancementBotUrl, json);
+    }
+
+    private void sendToDiscordBot(String eventType, String url, String json) {
+        HttpRequest request;
+
+        try {
+            request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(8))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + this.bridgeSecret)
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            json,
+                            StandardCharsets.UTF_8
+                    ))
+                    .build();
+        } catch (IllegalArgumentException exception) {
+            getLogger().warning(
+                    "URL invalide pour l'endpoint " + eventType + " : " + url
+            );
+            return;
+        }
 
         this.httpClient.sendAsync(
                 request,
@@ -169,13 +284,17 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
                 getLogger().warning(
                         "Le bot Discord a répondu "
                                 + response.statusCode()
+                                + " pour "
+                                + eventType
                                 + " : "
                                 + response.body()
                 );
             }
         }).exceptionally(error -> {
             getLogger().warning(
-                    "Impossible d'envoyer le message Minecraft vers Discord : "
+                    "Impossible d'envoyer "
+                            + eventType
+                            + " vers le bot Discord : "
                             + error.getMessage()
             );
             return null;
@@ -184,9 +303,10 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
 
     private void startHttpServer() throws IOException {
         int port = getConfig().getInt("http-port", 8080);
+        String bindAddress = getConfig().getString("http-bind-address", "0.0.0.0");
 
         this.httpServer = HttpServer.create(
-                new InetSocketAddress("0.0.0.0", port),
+                new InetSocketAddress(bindAddress, port),
                 0
         );
 
@@ -199,7 +319,9 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
         this.httpServer.start();
 
         getLogger().info(
-                "Discord -> Minecraft : http://0.0.0.0:"
+                "Discord -> Minecraft : http://"
+                        + bindAddress
+                        + ":"
                         + port
                         + "/discord-message"
         );
@@ -217,8 +339,7 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
                 return;
             }
 
-            String authorization = exchange.getRequestHeaders()
-                    .getFirst("Authorization");
+            String authorization = exchange.getRequestHeaders().getFirst("Authorization");
 
             if (!("Bearer " + this.bridgeSecret).equals(authorization)) {
                 sendJson(exchange, 401, "{\"error\":\"Unauthorized\"}");
@@ -226,7 +347,6 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
             }
 
             String requestBody = readRequestBody(exchange.getRequestBody());
-
             String username = readJsonString(requestBody, "username");
             String message = readJsonString(requestBody, "message");
 
@@ -288,11 +408,7 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
         return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
     }
 
-    private static void sendJson(
-            HttpExchange exchange,
-            int status,
-            String body
-    ) throws IOException {
+    private static void sendJson(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
 
         exchange.getResponseHeaders().set(
