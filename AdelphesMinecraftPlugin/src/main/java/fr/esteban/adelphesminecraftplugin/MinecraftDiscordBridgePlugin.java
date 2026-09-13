@@ -13,6 +13,8 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerAdvancementDoneEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.IOException;
@@ -41,6 +43,8 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
     private String chatBotUrl;
     private String deathBotUrl;
     private String advancementBotUrl;
+    private String joinBotUrl;
+    private String leftBotUrl;
     private String bridgeSecret;
     private String discordPrefix;
 
@@ -48,6 +52,8 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
     private boolean relayDiscordToMinecraft;
     private boolean relayDeathsToDiscord;
     private boolean relayAdvancementsToDiscord;
+    private boolean relayJoinsToDiscord;
+    private boolean relayLeavesToDiscord;
 
     @Override
     public void onEnable() {
@@ -85,6 +91,8 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
         getLogger().info("Chat Minecraft -> Discord : " + this.chatBotUrl);
         getLogger().info("Morts Minecraft -> Discord : " + this.deathBotUrl);
         getLogger().info("Advancements Minecraft -> Discord : " + this.advancementBotUrl);
+        getLogger().info("Connexions Minecraft -> Discord : " + this.joinBotUrl);
+        getLogger().info("Déconnexions Minecraft -> Discord : " + this.leftBotUrl);
     }
 
     @Override
@@ -120,6 +128,16 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
                 "http://192.168.1.89:3009/minecraft/advancement"
         );
 
+        this.joinBotUrl = getConfig().getString(
+                "join-bot-url",
+                "http://192.168.1.89:3009/minecraft/join"
+        );
+
+        this.leftBotUrl = getConfig().getString(
+                "left-bot-url",
+                "http://192.168.1.89:3009/minecraft/left"
+        );
+
         this.bridgeSecret = getConfig().getString("bridge-secret", "");
         this.discordPrefix = getConfig().getString("discord-prefix", "[Discord]");
 
@@ -143,6 +161,16 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
                 true
         );
 
+        this.relayJoinsToDiscord = getConfig().getBoolean(
+                "relay-joins-to-discord",
+                true
+        );
+
+        this.relayLeavesToDiscord = getConfig().getBoolean(
+                "relay-leaves-to-discord",
+                true
+        );
+
         if (this.bridgeSecret == null
                 || this.bridgeSecret.isBlank()
                 || this.bridgeSecret.equals("REMPLACE_PAR_TA_CLE_SECRETE")) {
@@ -154,6 +182,8 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
         validateUrl("chat-bot-url", this.chatBotUrl);
         validateUrl("death-bot-url", this.deathBotUrl);
         validateUrl("advancement-bot-url", this.advancementBotUrl);
+        validateUrl("join-bot-url", this.joinBotUrl);
+        validateUrl("left-bot-url", this.leftBotUrl);
     }
 
     private void validateUrl(String configKey, String url) {
@@ -253,6 +283,36 @@ public final class MinecraftDiscordBridgePlugin extends JavaPlugin implements Li
                 + "}";
 
         sendToDiscordBot("advancement", this.advancementBotUrl, json);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        if (!this.relayJoinsToDiscord) {
+            return;
+        }
+
+        String username = event.getPlayer().getName();
+
+        String json = "{"
+                + "\"username\":\"" + escapeJson(username) + "\""
+                + "}";
+
+        sendToDiscordBot("connexion", this.joinBotUrl, json);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        if (!this.relayLeavesToDiscord) {
+            return;
+        }
+
+        String username = event.getPlayer().getName();
+
+        String json = "{"
+                + "\"username\":\"" + escapeJson(username) + "\""
+                + "}";
+
+        sendToDiscordBot("déconnexion", this.leftBotUrl, json);
     }
 
     private void sendToDiscordBot(String eventType, String url, String json) {
